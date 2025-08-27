@@ -6,6 +6,7 @@ A simple UI for managing an Aurora and RDS DB Instance. Can be used to execute P
 
 # Before You Deploy
 ## .env required to deploy
+Create in same directory as deploy.sh
 ## example:
 ```bash
 DB_HOST=your_aws_project.us-east-1.rds.amazonaws.com
