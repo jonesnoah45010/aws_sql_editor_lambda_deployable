@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SQL Editor</title>
+
+  <!-- CodeMirror (editor + SQL mode + minimal theme) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/theme/material.css">
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/sql/sql.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/edit/matchbrackets.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/comment/comment.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/show-hint.js"></script>
+  <link  rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/show-hint.css">
+
+  <!-- SQL formatter -->
+  <script src="https://cdn.jsdelivr.net/npm/sql-formatter@15.4.4/dist/sql-formatter.min.js"></script>
+
+  <style>
+    :root { --bg:#0b1020; --panel:#121931; --ink:#e6e9f2; --muted:#9aa3b2; --accent:#6aa1ff; }
+    body { background:var(--bg); color:var(--ink); font-family: ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; margin:0; }
+    .wrap { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
+
+    .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+    @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+
+    .card { background:var(--panel); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.35); padding:16px; }
+    h1 { margin: 0 0 12px 0; }
+    .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
+    select, input[type="text"] { background:#0f1730; border:1px solid #28314d; color:var(--ink); border-radius:10px; padding:8px 10px; }
+    button { background:var(--accent); color:#070b1a; border:0; padding:10px 14px; border-radius:10px; font-weight:700; cursor:pointer; }
+    button.secondary { background:#233157; color:var(--ink); }
+
+    /* CodeMirror skin */
+    .CodeMirror {
+      height: 260px;
+      border: 1px solid #28314d;
+      border-radius: 12px;
+      background: #0f1730;
+      color: var(--ink);
+      font-size: 14px;
+    }
+    .cm-s-material.CodeMirror { background:#0f1730; }
+    .cm-s-material .CodeMirror-gutters { background:#0f1730; border-right:1px solid #28314d; }
+    .meta { color:var(--muted); font-size:13px; margin-top:6px; }
+    .status { margin-top:10px; min-height:20px; }
+    .error { color:#ff9da3; white-space:pre-wrap; }
+    table { width:100%; border-collapse:collapse; margin-top:12px; overflow:auto; display:block; }
+    th, td { border-bottom:1px solid #2a3555; padding:8px; text-align:left; white-space:nowrap; }
+    th { position:sticky; top:0; background:#141c37; z-index:1; }
+    .rowlimit { width: 96px; }
+    .spacer { flex: 1 1 auto; }
+
+    /* Tables panel */
+    .tables-header { display:flex; align-items:center; gap:8px; }
+    .schema-select { background:#0f1730; border:1px solid #28314d; color:var(--ink); border-radius:10px; padding:6px 8px; }
+    details { border:1px solid #28314d; border-radius:12px; margin:8px 0; }
+    details > summary { cursor:pointer; padding:8px 12px; list-style:none; user-select:none; }
+    details > summary::-webkit-details-marker { display:none; }
+    details[open] > summary { background:#141c37; border-bottom:1px solid #28314d; border-top-left-radius:12px; border-top-right-radius:12px; }
+    pre.ddl { margin:0; padding:12px; overflow:auto; background:#0f1730; border-bottom-left-radius:12px; border-bottom-right-radius:12px; }
+    .small-meta { color:var(--muted); font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>SQL Editor</h1>
+
+    <div class="grid">
+      <!-- Left: Editor -->
+      <div class="card">
+        <div class="bar">
+          <label>Database:
+            <select id="dbList"></select>
+          </label>
+          <button id="btnConnect" class="secondary">Connect</button>
+          <input id="newDbName" type="text" placeholder="new_database_name" />
+          <button id="btnCreateDb" title="Create new database">Create DB</button>
+          <button id="btnRefreshDbs" class="secondary" title="Refresh database list">⟳</button>
+          <div class="spacer"></div>
+          <label class="meta">Current: <span id="currentDb">{{ current_db }}</span></label>
+        </div>
+
+        <!-- CodeMirror mount point -->
+        <textarea id="sql" style="display:none;">SELECT now() AS server_time;</textarea>
+        <div id="editorContainer"></div>
+
+        <div class="bar" style="margin-top:10px;">
+          <button id="run">▶ Run (Cmd/Ctrl+Enter)</button>
+          <button id="format" class="secondary" title="Pretty-print SQL">⤾ Format</button>
+          <button id="toggleWrap" class="secondary" title="Toggle line wrap">↵ Wrap</button>
+          <button id="download" class="secondary">⬇ Download CSV</button>
+          <label class="meta">Preview limit
+            <input class="rowlimit" id="rowlimit" type="number" min="1" max="50000" value="1000" />
+          </label>
+          <div class="spacer"></div>
+          <span id="timing" class="meta"></span>
+        </div>
+
+        <div id="status" class="status"></div>
+        <div id="results"></div>
+      </div>
+
+      <!-- Right: Tables & Schemas -->
+      <div class="card">
+        <div class="tables-header">
+          <h2 style="margin:0;">Tables</h2>
+          <div class="spacer"></div>
+          <label class="small-meta">Schema:</label>
+          <select id="schemaSelect" class="schema-select" title="Database schema">
+            <option value="public" selected>public</option>
+          </select>
+          <button id="btnRefreshTables" class="secondary" title="Reload tables">⟳</button>
+        </div>
+        <div id="tablesPanel" class="meta" style="margin-top:8px;">Loading…</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* -------------------- Editor setup (CodeMirror) -------------------- */
+const editor = CodeMirror(document.getElementById('editorContainer'), {
+  value: document.getElementById('sql').value,
+  mode: 'text/x-pgsql',          // pg-friendly SQL mode
+  theme: 'material',
+  lineNumbers: true,
+  matchBrackets: true,
+  indentWithTabs: false,
+  indentUnit: 2,
+  tabSize: 2,
+  smartIndent: true,
+  autofocus: true,
+  lineWrapping: false,           // toggled by button
+  extraKeys: {
+    'Ctrl-/': 'toggleComment',
+    'Cmd-/': 'toggleComment',
+    'Ctrl-Enter': runQuery,
+    'Cmd-Enter': runQuery,
+    'Alt-F': formatSql,
+  }
+});
+
+/* Formatting via sql-formatter */
+function formatSql(){
+  try{
+    const src = editor.getSelection() || editor.getValue();
+    const formatted = window.sqlFormatter.format(src, { language: 'postgresql' });
+    if(editor.somethingSelected()){
+      editor.replaceSelection(formatted, 'around');
+    }else{
+      const cursor = editor.getCursor();
+      editor.setValue(formatted);
+      editor.setCursor(cursor); // keep cursor roughly where it was
+    }
+  }catch(err){
+    console.error(err);
+  }
+}
+
+function toggleWrap(){
+  const current = editor.getOption('lineWrapping');
+  editor.setOption('lineWrapping', !current);
+}
+
+/* -------------------- Existing page logic (adapted to use editor) -------------------- */
+const $ = (s)=>document.querySelector(s);
+const results  = $("#results");
+const statusEl = $("#status");
+const timing   = $("#timing");
+const dbList   = $("#dbList");
+const currentDb= $("#currentDb");
+const tablesPanel = $("#tablesPanel");
+const schemaSelect = $("#schemaSelect");
+
+function escapeHtml(v){
+  if(v === null || v === undefined) return '';
+  return String(v).replace(/[&<>\"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));
+}
+async function getJSON(url){
+  const r = await fetch(url);
+  const data = await r.json().catch(()=>({error:"Invalid JSON"}));
+  if(!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+async function postJSON(url, body){
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const data = await r.json().catch(()=>({error:"Invalid JSON"}));
+  if(!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+function renderTable(columns, rows, limit){
+  const lim = Math.max(1, parseInt(limit || rows.length, 10));
+  const slice = rows.slice(0, lim);
+  const thead = `<thead><tr>${columns.map(c=>`<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>`;
+  const tbody = `<tbody>${slice.map(r=>`<tr>${r.map(c=>`<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody>`;
+  results.innerHTML = `<div class="meta">Showing ${slice.length} of ${rows.length} row(s)</div><table>${thead}${tbody}</table>`;
+}
+
+async function loadDatabases(){
+  try{
+    const data = await getJSON('/api/databases');
+    dbList.innerHTML = data.databases.map(n=>`<option ${n===data.current?'selected':''}>${escapeHtml(n)}</option>`).join('');
+    currentDb.textContent = data.current || '';
+  }catch(err){
+    statusEl.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+  }
+}
+async function connectDb(){
+  const name = dbList.value;
+  try{
+    const res = await postJSON('/api/connect', {name});
+    currentDb.textContent = res.current;
+    statusEl.textContent = `Connected to ${res.current}`;
+    await loadTableSchemas();
+  }catch(err){
+    statusEl.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+  }
+}
+async function createDb(){
+  const name = $("#newDbName").value.trim();
+  if(!name){ statusEl.innerHTML = `<div class="error">Enter a database name</div>`; return; }
+  try{
+    await postJSON('/api/databases', {name});
+    statusEl.textContent = `Created database ${name}`;
+    $("#newDbName").value = '';
+    await loadDatabases();
+    await loadTableSchemas();
+  }catch(err){
+    statusEl.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function runQuery(){
+  const query = editor.getValue();
+  timing.textContent = 'Running…';
+  statusEl.textContent = '';
+  results.innerHTML = '';
+  try{
+    const data = await postJSON('/api/sql', {query});
+    timing.textContent = `${data.rowcount ?? 0} row(s) • ${data.duration_ms} ms`;
+    if(!data.columns || data.columns.length === 0){
+      results.innerHTML = '<div class="meta">Statement executed (no tabular result).</div>';
+    }else{
+      renderTable(data.columns, data.rows || [], $("#rowlimit").value);
+    }
+    await loadTableSchemas(); // refresh after DDL
+  }catch(err){
+    timing.textContent = '';
+    statusEl.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function downloadCsv(){
+  const query = editor.getValue();
+  statusEl.textContent = '';
+  try{
+    const res = await fetch('/api/sql/csv', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({query})});
+    if(!res.ok){ const t = await res.text(); throw new Error(t || res.statusText); }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'query_results.csv'; a.click();
+    setTimeout(()=>window.URL.revokeObjectURL(url), 1000);
+  }catch(err){
+    statusEl.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+/* ---------- Tables & Schemas (UPDATED to include indexes & partitions) ---------- */
+function renderTablesPanel(data){
+  if(data.error){
+    tablesPanel.innerHTML = `<div class="error">${escapeHtml(data.error)}</div>`;
+    return;
+  }
+  const { schema, tables, ddl, indexes = {}, partitions = {} } = data;
+  if(!tables || tables.length === 0){
+    tablesPanel.innerHTML = `<div class="meta">No base tables found in schema <code>${escapeHtml(schema)}</code>.</div>`;
+    return;
+  }
+
+  tablesPanel.innerHTML = `
+    <div class="small-meta">Schema: <code>${escapeHtml(schema)}</code> • ${tables.length} table(s)</div>
+    ${tables.map(name => {
+      const idxs = indexes?.[name] || [];
+      const part = partitions?.[name] || {};
+      const isPartitioned = !!part.is_partitioned;
+      const isPartition   = !!part.is_partition;
+
+      const partHeader = isPartitioned
+        ? `Partitioned (${escapeHtml(part.strategy || 'unknown')}${part.key_columns && part.key_columns.length ? ` on (${part.key_columns.map(escapeHtml).join(', ')})` : ''})`
+        : (isPartition ? `Partition of ${escapeHtml(part.parent || '')}` : '');
+
+      const childrenHtml = (part.children && part.children.length)
+        ? `<div class="small-meta" style="margin-top:6px;"><strong>Partitions</strong></div>
+           <table>
+             <thead><tr><th>Name</th><th>Bounds</th></tr></thead>
+             <tbody>
+              ${part.children.map(ch => `
+                <tr><td>${escapeHtml(ch.name)}</td><td>${escapeHtml(ch.bounds || '')}</td></tr>
+              `).join('')}
+             </tbody>
+           </table>`
+        : '';
+
+      const idxHtml = idxs.length
+        ? `<div class="small-meta" style="margin-top:6px;"><strong>Indexes</strong> (${idxs.length})</div>
+           <table>
+             <thead><tr><th>Name</th><th>Definition</th></tr></thead>
+             <tbody>
+               ${idxs.map(ix => `
+                 <tr>
+                   <td>${escapeHtml(ix.name)}</td>
+                   <td><code>${escapeHtml(ix.def || '')}</code></td>
+                 </tr>`).join('')}
+             </tbody>
+           </table>`
+        : '';
+
+      const partitionMeta = isPartitioned || isPartition
+        ? `<div class="small-meta" style="margin-top:6px;"><strong>Partition Info</strong>: ${escapeHtml(partHeader)}</div>
+           ${isPartition && part.bounds ? `<div class="small-meta">Bounds: <code>${escapeHtml(part.bounds)}</code></div>` : ''}
+           ${childrenHtml}`
+        : '';
+
+      return `
+        <details>
+          <summary>${escapeHtml(name)}</summary>
+          <pre class="ddl"><code>${escapeHtml(ddl?.[name] || '')}</code></pre>
+          ${idxHtml}
+          ${partitionMeta}
+        </details>
+      `;
+    }).join('')}
+  `;
+}
+
+async function loadTableSchemas(){
+  const schema = schemaSelect.value || 'public';
+  tablesPanel.textContent = 'Loading…';
+  try{
+    const data = await getJSON('/api/table-schemas?schema=' + encodeURIComponent(schema));
+    renderTablesPanel(data);
+  }catch(err){
+    tablesPanel.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+/* ---------- Wire up ---------- */
+$("#btnRefreshDbs").addEventListener('click', loadDatabases);
+$("#btnConnect").addEventListener('click', connectDb);
+$("#btnCreateDb").addEventListener('click', createDb);
+$("#run").addEventListener('click', runQuery);
+$("#format").addEventListener('click', formatSql);
+$("#toggleWrap").addEventListener('click', toggleWrap);
+$("#download").addEventListener('click', downloadCsv);
+$("#btnRefreshTables").addEventListener('click', loadTableSchemas);
+schemaSelect.addEventListener('change', loadTableSchemas);
+
+document.addEventListener('keydown', (e)=>{
+  if((e.metaKey || e.ctrlKey) && e.key === 'Enter') runQuery();
+});
+
+/* Initial loads */
+loadDatabases();
+loadTableSchemas();
+</script>
+</body>
+</html>
